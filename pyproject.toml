@@ -1,0 +1,32 @@
+[project]
+name = "app"
+version = "0.1.0"
+description = "Agentic design patterns and examples with LangChain and AWS Bedrock"
+readme = "README.md"
+authors = []
+requires-python = ">=3.12"
+dependencies = [
+    "python-dotenv>=1.2.3",
+    "requests>=2.34.2",
+    "langchain>=0.3.0",
+    "langchain-aws>=0.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+]
+
+[project.scripts]
+app = "app:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
