@@ -18,9 +18,10 @@ No linter, formatter, or typecheck config exists. Do not invent one; just run `p
 ## Architecture (correct the stale CLAUDE.md/README)
 
 - Example registry + CLI helpers live in `src/app/cli.py` (EXAMPLES dict, `print_help`, `CMD_*` constants) — NOT `src/examples/cli.py`.
-- `src/examples/__main__.py` is the example CLI dispatcher; its `main()` calls `validate_aws_credentials()` before running **any** example. Add a new `elif command == "<name>"` branch there.
+- `src/examples/__main__.py` is the example CLI dispatcher using dictionary dispatch; its `main()` calls `validate_aws_credentials()` before running **any** example. Add a new helper function and register it in the `COMMANDS` dict.
 - `src/app/config.py` calls `load_dotenv()` at import time; env vars are read as module constants. `src/app/bedrock.py` builds the `ChatBedrock` instance at import time and calls `validate_aws_credentials()` at module scope.
 - `src/app/examples.py` is dead legacy code (pre-dates the `src/examples/` package); don't extend it.
+- Logging uses lazy % formatting (not f-strings) for efficiency; configured globally in `pyproject.toml` to disable `import-outside-toplevel` pylint warnings (lazy imports are intentional for startup speed).
 
 ## Gotchas
 
@@ -33,6 +34,6 @@ No linter, formatter, or typecheck config exists. Do not invent one; just run `p
 
 1. `src/examples/<name>/<module>.py` with a `run_*()`/entry function
 2. `src/examples/<name>/__init__.py` exporting it
-3. Register description in `src/app/cli.py` `EXAMPLES` dict
-4. Dispatch in `src/examples/__main__.py`
+3. Register description in `src/app/cli.py` `EXAMPLES` dict and add `CMD_*` constant
+4. Add helper function and register in `COMMANDS` dict in `src/examples/__main__.py`
 5. Verify: `uv run pytest`

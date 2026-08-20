@@ -2,50 +2,68 @@
 
 import sys
 import logging
+
 from ..app.config import validate_aws_credentials
-from ..app.cli import print_help, CMD_PROMPT_CHAINING, CMD_HELP
+from ..app.cli import CMD_ROUTING, print_help, CMD_PROMPT_CHAINING, CMD_HELP
 
 logger = logging.getLogger(__name__)
 
 
 def _setup_logging() -> None:
-	"""Configure logging for the application."""
-	logging.basicConfig(
-		level=logging.INFO,
-		format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-	)
+    """Configure logging for the application."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    )
+
+
+def _run_prompt_chaining() -> None:
+    """Run the prompt chaining example."""
+    logger.info("Running prompt_chaining example")
+    from .prompt_chaining import extract_specifications
+    extract_specifications()
+
+
+def _run_routing() -> None:
+    """Run the routing example."""
+    logger.info("Running routing example")
+    from .routing import handle_requests
+    handle_requests()
+
+
+COMMANDS = {
+    CMD_PROMPT_CHAINING: _run_prompt_chaining,
+    CMD_ROUTING: _run_routing,
+    CMD_HELP: print_help,
+}
 
 
 def main() -> None:
-	"""Main CLI entry point."""
-	_setup_logging()
+    """Main CLI entry point."""
+    _setup_logging()
 
-	if len(sys.argv) < 2:
-		print_help()
-		sys.exit(1)
+    if len(sys.argv) < 2:
+        print_help()
+        sys.exit(1)
 
-	command = sys.argv[1]
-	logger.debug(f"Command invoked: {command}")
+    command = sys.argv[1]
+    logger.debug("Command invoked: %s", command)
 
-	try:
-		validate_aws_credentials()
-	except ValueError as e:
-		logger.error(f"Configuration error: {e}")
-		print(f"Configuration error: {e}")
-		sys.exit(1)
+    try:
+        validate_aws_credentials()
+    except ValueError as e:
+        logger.error("Configuration error: %s", e)
+        print(f"Configuration error: {e}")
+        sys.exit(1)
 
-	if command == CMD_PROMPT_CHAINING:
-		logger.info("Running prompt_chaining example")
-		from .prompt_chaining import extract_specifications
-		extract_specifications()
-	elif command == CMD_HELP:
-		print_help()
-	else:
-		logger.error(f"Unknown example: {command}")
-		print(f"Unknown example: {command}")
-		print_help()
-		sys.exit(1)
+    if command in COMMANDS:
+        COMMANDS[command]()
+    else:
+        logger.error("Unknown example: %s", command)
+        print(f"Unknown example: {command}")
+        print_help()
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-	main()
+    main()

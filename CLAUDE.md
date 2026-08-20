@@ -9,6 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 uv sync                    # Install/sync all dependencies
 uv run app                 # Run main application
 uv run python -m src.examples prompt_chaining  # Run prompt chaining example
+uv run python -m src.examples routing          # Run rounting example
 uv run python -m src.examples help             # List all available examples
 ```
 
@@ -23,17 +24,18 @@ This is a **learning/demo project** organized around design patterns, not a mono
 ```
 src/
 ├── app/              # Core application (config, validation, entry point)
+│   └── cli.py        # Shared CLI utilities (help text, example registry)
 ├── examples/         # All design pattern examples (loosely coupled)
-│   ├── cli.py        # Shared CLI utilities (help text, example registry)
-│   ├── __main__.py   # CLI dispatcher (routes commands to examples)
-│   └── [pattern]/    # Each pattern gets its own module (prompt_chaining, routing, etc.)
+│   ├── __main__.py   # CLI dispatcher using dictionary dispatch
+│   ├── prompt_chaining/  # Prompt chaining example
+│   └── routing/          # Routing example
 ```
 
 ### Key Design Decisions
 
-1. **Examples are First-Class**: Each example is a standalone module under `src/examples/`. They don't import from each other; they only share utilities via `cli.py`.
+1. **Examples are First-Class**: Each example is a standalone module under `src/examples/`. They don't import from each other; they only share utilities via `src/app/cli.py`.
 
-2. **Shared CLI Registry**: `src/examples/cli.py` defines an `EXAMPLES` dictionary that centralizes:
+2. **Shared CLI Registry**: `src/app/cli.py` defines an `EXAMPLES` dictionary that centralizes:
    - Available examples and their descriptions
    - Help text generation (auto-updates as examples are added)
    - This is the single source of truth for CLI documentation
@@ -45,14 +47,18 @@ src/
 
 4. **Lazy Imports**: Example code imports only when the command is invoked (keeps startup fast, avoids loading unused dependencies).
 
+5. **Dictionary Dispatch**: `src/examples/__main__.py` uses a `COMMANDS` dictionary to map command constants to handler functions, making it easy to add new examples without complex if/elif chains.
+
 ## Adding New Examples
 
 **Minimal steps:**
 
-1. Create a new module: `src/examples/routing/router.py`
-2. Export your function: `src/examples/routing/__init__.py` → `from .router import run_routing`
-3. Register in `src/examples/cli.py` → `EXAMPLES["routing"] = "description"`
-4. Add handler in `src/examples/__main__.py` → `elif command == "routing": from .routing import run_routing; run_routing()`
+1. Create a new module: `src/examples/new_pattern/module.py` with a `run_*()` function
+2. Export your function: `src/examples/new_pattern/__init__.py` → `from .module import run_new_pattern; __all__ = ["run_new_pattern"]`
+3. Register in `src/app/cli.py` → add `CMD_NEW_PATTERN = "new_pattern"` and `EXAMPLES[CMD_NEW_PATTERN] = "description"`
+4. Add handler in `src/examples/__main__.py`:
+   - Create helper: `def _run_new_pattern() -> None: ... from .new_pattern import run_new_pattern; run_new_pattern()`
+   - Register in `COMMANDS` dict: `CMD_NEW_PATTERN: _run_new_pattern,`
 
 That's it. Help text auto-updates, and the example is runnable.
 
@@ -76,6 +82,21 @@ from langchain_aws import ChatBedrock
 llm = ChatBedrock(model_id=BEDROCK_MODEL_ID, region_name=AWS_REGION)
 ```
 
+### Logging Best Practices
+
+Use lazy % formatting instead of f-strings for efficiency (the logger only formats if the log level is enabled):
+
+```python
+# Good: lazy formatting
+logger.info("Processing example: %s", example_name)
+logger.error("Configuration error: %s", e)
+
+# Avoid: f-string formatting
+logger.info(f"Processing example: {example_name}")  # Formats even if INFO is disabled
+```
+
+The project has `import-outside-toplevel` disabled globally in `pyproject.toml` since lazy imports are intentional for startup speed.
+
 ### Prompt Chaining Example (`src/examples/prompt_chaining/spec_extractor.py`)
 
 Two-step pipeline:
@@ -88,9 +109,9 @@ Demonstrates **best practice for structured output**: validate JSON with `json.l
 
 ### Shared Utilities
 
-`src/examples/cli.py` is the pattern for shared code across examples:
-- Centralized example registry
-- Reusable CLI helpers
+`src/app/cli.py` provides shared code across examples:
+- Centralized example registry (`EXAMPLES` dict)
+- Reusable CLI helpers (`print_help`, command constants)
 - Easy to extend without duplicating logic
 
 ## Common Tasks
@@ -110,10 +131,17 @@ Demonstrates **best practice for structured output**: validate JSON with `json.l
 
 ## Testing Strategy
 
-*Currently no test suite.* If tests are added:
-- Place in `tests/` at project root
-- Run with `uv run pytest` (after adding pytest to dependencies)
+Tests exist in `tests/` at project root. Run with `uv run pytest`.
+
+**Test structure:**
+- `test_spec_extractor.py` — Tests prompt chaining example with mocked LLM
+- `test_config.py` — Tests AWS credential validation
+- `test_cli.py` — Tests CLI dispatch logic
+
+**Guidelines:**
 - Examples should be testable as standalone functions (support dependency injection for mocking LLM)
+- Never import examples at module scope if they touch `src.app.bedrock` (credentials required at import time)
+- Tests must not invoke the CLI's `main()` function directly (it validates credentials upfront)
 
 ## Dependencies
 

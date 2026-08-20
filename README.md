@@ -5,6 +5,7 @@ A collection of design patterns and examples demonstrating how to build agentic 
 ## Features
 
 - **Prompt Chaining**: Extract technical specifications from product text and transform them into structured JSON format
+- **Routing**: Route user requests to different tasks based on intent
 - **AWS Bedrock Integration**: Examples using Claude models via AWS Bedrock
 - **Structured Output**: Demonstrates best practices for validating LLM outputs
 
@@ -56,6 +57,9 @@ The project includes organized examples accessible via CLI:
 # Run the prompt chaining example (spec extraction)
 uv run python -m src.examples prompt_chaining
 
+# Run the routing example
+uv run python -m src.examples routing
+
 # Show available examples and usage
 uv run python -m src.examples help
 ```
@@ -90,9 +94,12 @@ agentic-design-patterns/
 │   └── examples/                   # All pattern examples
 │       ├── __init__.py
 │       ├── __main__.py             # CLI handler for examples
-│       └── prompt_chaining/        # Prompt chaining example
+│       ├── prompt_chaining/        # Prompt chaining example
+│       │   ├── __init__.py
+│       │   └── spec_extractor.py   # Spec extraction and JSON transformation
+│       └── routing/                # Routing example
 │           ├── __init__.py
-│           └── spec_extractor.py   # Spec extraction and JSON transformation
+│           └── task_cordinator_agent.py  # Task routing and orchestration
 │
 ├── app.py                          # Entry point wrapper
 ├── pyproject.toml                  # Project configuration and dependencies
@@ -131,34 +138,45 @@ See `pyproject.toml` for complete dependency list.
 
 1. Create a new directory under `src/examples/`:
    ```bash
-   mkdir src/examples/routing
+   mkdir src/examples/new_example
    ```
 
 2. Create your example module:
    ```python
-   # src/examples/routing/router.py
-   def run_routing():
-       """Your routing example implementation."""
+   # src/examples/new_example/module.py
+   def run_new_example():
+       """Your example implementation."""
        pass
    ```
 
 3. Create an `__init__.py` file to export your function:
    ```python
-   # src/examples/routing/__init__.py
-   from .router import run_routing
-   __all__ = ["run_routing"]
+   # src/examples/new_example/__init__.py
+   from .module import run_new_example
+   __all__ = ["run_new_example"]
    ```
 
 4. Update `src/examples/__main__.py` to add the new command:
    ```python
-   elif command == "routing":
-       from .routing import run_routing
-       run_routing()
+   # Add helper function
+   def _run_new_example() -> None:
+       """Run the new example."""
+       logger.info("Running new_example")
+       from .new_example import run_new_example
+       run_new_example()
+
+   # Add to COMMANDS dictionary
+   COMMANDS = {
+       CMD_PROMPT_CHAINING: _run_prompt_chaining,
+       CMD_ROUTING: _run_routing,
+       CMD_NEW_EXAMPLE: _run_new_example,
+       CMD_HELP: print_help,
+   }
    ```
 
-5. Run your example:
+5. Register the command in `src/app/cli.py` and run your example:
    ```bash
-   uv run python -m src.examples routing
+   uv run python -m src.examples new_example
    ```
 
 ## Troubleshooting

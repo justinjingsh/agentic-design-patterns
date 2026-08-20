@@ -13,6 +13,6 @@ llm: ChatBedrock = ChatBedrock(
 	region_name=AWS_REGION,
 )
 
-logger.debug(f"ChatBedrock instance initialized (model: {BEDROCK_MODEL_ID}, region: {AWS_REGION})")
+logger.debug("ChatBedrock instance initialized (model: %s, region: %s)", BEDROCK_MODEL_ID, AWS_REGION)
 
 __all__ = ['llm']

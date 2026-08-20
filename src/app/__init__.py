@@ -14,5 +14,5 @@ def main() -> None:
 		logger.info("AWS credentials validated successfully")
 		print_help()
 	except ValueError as e:
-		logger.error(f"Configuration error: {e}")
+		logger.error("Configuration error: %s", e)
 		raise

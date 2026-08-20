@@ -7,10 +7,12 @@ logger = logging.getLogger(__name__)
 
 # Command constants
 CMD_PROMPT_CHAINING: str = "prompt_chaining"
+CMD_ROUTING: str = "routing"
 CMD_HELP: str = "help"
 
 EXAMPLES: Dict[str, str] = {
 	CMD_PROMPT_CHAINING: "Extract specs and transform to JSON",
+    CMD_ROUTING: "Task Cordinator Agent"
 }
 
 
@@ -24,7 +26,8 @@ def print_help() -> None:
 		help_text += f"  {name:<20} - {description}\n"
 	help_text += "  help               - Show this help message\n\n"
 	help_text += "Example:\n"
-	help_text += "  uv run python -m src.examples prompt_chaining"
+	help_text += "  uv run python -m src.examples prompt_chaining\n\n"
+	help_text += "  uv run python -m src.examples routing\n"
 
 	print(help_text)
 	logger.info("Help text displayed")

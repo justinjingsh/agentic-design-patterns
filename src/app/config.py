@@ -20,4 +20,4 @@ def validate_aws_credentials() -> None:
 		raise ValueError("AWS_ACCESS_KEY_ID not set in environment")
 	if not AWS_SECRET_ACCESS_KEY:
 		raise ValueError("AWS_SECRET_ACCESS_KEY not set in environment")
-	logger.debug(f"AWS credentials validated (region: {AWS_REGION}, model: {BEDROCK_MODEL_ID})")
+	logger.debug("AWS credentials validated (region: %s, model: %s)", AWS_REGION, BEDROCK_MODEL_ID)
