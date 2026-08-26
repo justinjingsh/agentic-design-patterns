@@ -10,6 +10,7 @@ uv sync                    # Install/sync all dependencies
 uv run app                 # Run main application
 uv run python -m src.examples prompt_chaining  # Run prompt chaining example
 uv run python -m src.examples routing          # Run rounting example
+uv run python -m src.examples parallelization  # Run parallelization example
 uv run python -m src.examples help             # List all available examples
 ```
 
@@ -28,7 +29,8 @@ src/
 ├── examples/         # All design pattern examples (loosely coupled)
 │   ├── __main__.py   # CLI dispatcher using dictionary dispatch
 │   ├── prompt_chaining/  # Prompt chaining example
-│   └── routing/          # Routing example
+│   ├── routing/          # Routing example
+│   └── parallelization/  # Parallelization example
 ```
 
 ### Key Design Decisions
@@ -106,6 +108,15 @@ Two-step pipeline:
 Uses LangChain pipe operator (`|`) to chain runnables. The lambda step (specs string → dict) is crucial—it reformats data for the next prompt.
 
 Demonstrates **best practice for structured output**: validate JSON with `json.loads()` and handle `JSONDecodeError`. Relying on "just ask the model for JSON" fails in production.
+
+### Parallelization Example (`src/examples/parallelization/text_analysis.py`)
+
+Three independent sub-tasks (summary, sentiment, keywords) run concurrently against the same input:
+
+1. Each sub-task is its own linear chain: `prompt | llm | StrOutputParser()`.
+2. `RunnableParallel(summary=..., sentiment=..., keywords=...)` fans all three out at once (via a thread pool) instead of running them sequentially, and merges their outputs into a single dict keyed by the names passed to it.
+
+Unlike `prompt_chaining`, the sub-tasks here don't depend on each other's output, which is what makes concurrent execution safe. `analyze_text()` times the call to show that wall-clock reflects the slowest branch, not the sum of all three.
 
 ### Shared Utilities
 

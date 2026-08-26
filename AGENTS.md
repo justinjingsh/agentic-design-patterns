@@ -11,6 +11,7 @@ uv run pytest tests/test_spec_extractor.py -q   # run one test file
 uv run app             # entry point; validates AWS creds then prints example help
 uv run python -m src.examples help             # list examples
 uv run python -m src.examples prompt_chaining  # run an example (needs live AWS creds)
+uv run python -m src.examples parallelization  # run the parallelization example
 ```
 
 No linter, formatter, or typecheck config exists. Do not invent one; just run `pytest`.
@@ -21,6 +22,7 @@ No linter, formatter, or typecheck config exists. Do not invent one; just run `p
 - `src/examples/__main__.py` is the example CLI dispatcher using dictionary dispatch; its `main()` calls `validate_aws_credentials()` before running **any** example. Add a new helper function and register it in the `COMMANDS` dict.
 - `src/app/config.py` calls `load_dotenv()` at import time; env vars are read as module constants. `src/app/bedrock.py` builds the `ChatBedrock` instance at import time and calls `validate_aws_credentials()` at module scope.
 - `src/app/examples.py` is dead legacy code (pre-dates the `src/examples/` package); don't extend it.
+- `src/examples/parallelization/text_analysis.py` demonstrates the Parallelization pattern: three independent sub-chains (summary, sentiment, keywords) fanned out via `RunnableParallel` and merged into one report — not a sequential `|` chain like `prompt_chaining`.
 - Logging uses lazy % formatting (not f-strings) for efficiency; configured globally in `pyproject.toml` to disable `import-outside-toplevel` pylint warnings (lazy imports are intentional for startup speed).
 
 ## Gotchas

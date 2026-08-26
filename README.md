@@ -6,8 +6,21 @@ A collection of design patterns and examples demonstrating how to build agentic 
 
 - **Prompt Chaining**: Extract technical specifications from product text and transform them into structured JSON format
 - **Routing**: Route user requests to different tasks based on intent
+- **Parallelization**: Run independent LLM sub-tasks (summary, sentiment, keywords) concurrently and merge their results
 - **AWS Bedrock Integration**: Examples using Claude models via AWS Bedrock
 - **Structured Output**: Demonstrates best practices for validating LLM outputs
+
+## Implementation Approach: LCEL Primitives, not `create_agent`
+
+The examples in this repo are built directly from **LangChain Expression Language (LCEL)** primitives — `Runnable`, the `|` compose operator, `RunnableBranch`, `RunnableLambda`, `RunnableParallel` — rather than from LangChain's prebuilt `create_agent` (a higher-level constructor that wraps an LLM-driven tool-calling loop, formerly `create_react_agent`).
+
+This is intentional: `create_agent` is itself built out of these same LCEL/LangGraph primitives, so writing examples at this lower layer makes each pattern's mechanics visible instead of hiding them behind one call.
+
+- **`prompt_chaining`** (`spec_extractor.py`): a fixed, linear sequence of two LLM calls (extract → transform) composed with `|`. The control flow is deterministic — there's no decision-making about what to do next — so a plain LCEL chain is the right level of abstraction.
+- **`routing`** (`routing/cordinator_agent.py`): the LLM classifies the request into a category; a `RunnableBranch` (a plain conditional, not the LLM) dispatches to hand-written Python handler functions. This is "LLM as classifier + deterministic dispatch," which differs from an autonomous tool-calling agent.
+- **`parallelization`** (`parallelization/text_analysis.py`): three independent LLM sub-tasks (summary, sentiment, keywords) run concurrently against the same input via `RunnableParallel`, and their results are merged into one report. Because the sub-tasks don't depend on each other's output, fanning them out is safe and cuts wall-clock time to roughly the slowest single sub-task instead of the sum of all three.
+
+**When to reach for `create_agent` instead:** when the LLM itself needs to decide *which* tool(s) to call, possibly in a multi-step loop, reasoning over each result before continuing (e.g., "look up flight prices, then check hotel availability, then answer"). `create_agent` absorbs that observe → decide → act → repeat loop so you don't hand-roll it. It's less suited to cases like this repo's routing example, where dispatch is deterministic and fixed by a lookup map rather than left to the model's judgment.
 
 ## Prerequisites
 
@@ -60,6 +73,9 @@ uv run python -m src.examples prompt_chaining
 # Run the routing example
 uv run python -m src.examples routing
 
+# Run the parallelization example
+uv run python -m src.examples parallelization
+
 # Show available examples and usage
 uv run python -m src.examples help
 ```
@@ -97,9 +113,12 @@ agentic-design-patterns/
 │       ├── prompt_chaining/        # Prompt chaining example
 │       │   ├── __init__.py
 │       │   └── spec_extractor.py   # Spec extraction and JSON transformation
-│       └── routing/                # Routing example
+│       ├── routing/                # Routing example
+│       │   ├── __init__.py
+│       │   └── task_cordinator_agent.py  # Task routing and orchestration
+│       └── parallelization/        # Parallelization example
 │           ├── __init__.py
-│           └── task_cordinator_agent.py  # Task routing and orchestration
+│           └── text_analysis.py    # Concurrent summary/sentiment/keyword analysis
 │
 ├── app.py                          # Entry point wrapper
 ├── pyproject.toml                  # Project configuration and dependencies
