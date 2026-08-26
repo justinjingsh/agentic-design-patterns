@@ -12,6 +12,7 @@ uv run app             # entry point; validates AWS creds then prints example he
 uv run python -m src.examples help             # list examples
 uv run python -m src.examples prompt_chaining  # run an example (needs live AWS creds)
 uv run python -m src.examples parallelization  # run the parallelization example
+uv run python -m src.examples reflection       # run the reflection example
 ```
 
 No linter, formatter, or typecheck config exists. Do not invent one; just run `pytest`.
@@ -23,6 +24,7 @@ No linter, formatter, or typecheck config exists. Do not invent one; just run `p
 - `src/app/config.py` calls `load_dotenv()` at import time; env vars are read as module constants. `src/app/bedrock.py` builds the `ChatBedrock` instance at import time and calls `validate_aws_credentials()` at module scope.
 - `src/app/examples.py` is dead legacy code (pre-dates the `src/examples/` package); don't extend it.
 - `src/examples/parallelization/text_analysis.py` demonstrates the Parallelization pattern: three independent sub-chains (summary, sentiment, keywords) fanned out via `RunnableParallel` and merged into one report — not a sequential `|` chain like `prompt_chaining`.
+- `src/examples/reflection/reflection.py` demonstrates the Reflection pattern: a generate -> reflect -> refine loop over three plain LCEL chains (`build_generate_chain`, `build_reflect_chain`, `build_refine_chain`), each built fresh per call. The loop runs in `run_reflection_loop`, capped at `MAX_ITERATIONS` and exiting early on an exact-match `APPROVAL_TOKEN` from the reflector.
 - Logging uses lazy % formatting (not f-strings) for efficiency; configured globally in `pyproject.toml` to disable `import-outside-toplevel` pylint warnings (lazy imports are intentional for startup speed).
 
 ## Gotchas

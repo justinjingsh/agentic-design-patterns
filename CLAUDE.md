@@ -11,6 +11,7 @@ uv run app                 # Run main application
 uv run python -m src.examples prompt_chaining  # Run prompt chaining example
 uv run python -m src.examples routing          # Run rounting example
 uv run python -m src.examples parallelization  # Run parallelization example
+uv run python -m src.examples reflection       # Run reflection example
 uv run python -m src.examples help             # List all available examples
 ```
 
@@ -30,7 +31,8 @@ src/
 │   ├── __main__.py   # CLI dispatcher using dictionary dispatch
 │   ├── prompt_chaining/  # Prompt chaining example
 │   ├── routing/          # Routing example
-│   └── parallelization/  # Parallelization example
+│   ├── parallelization/  # Parallelization example
+│   └── reflection/       # Reflection example
 ```
 
 ### Key Design Decisions
@@ -117,6 +119,16 @@ Three independent sub-tasks (summary, sentiment, keywords) run concurrently agai
 2. `RunnableParallel(summary=..., sentiment=..., keywords=...)` fans all three out at once (via a thread pool) instead of running them sequentially, and merges their outputs into a single dict keyed by the names passed to it.
 
 Unlike `prompt_chaining`, the sub-tasks here don't depend on each other's output, which is what makes concurrent execution safe. `analyze_text()` times the call to show that wall-clock reflects the slowest branch, not the sum of all three.
+
+### Reflection Example (`src/examples/reflection/reflection.py`)
+
+A generate -> reflect -> refine loop, run per task in `run_reflection_loop()`:
+
+1. **Generate**: `build_generate_chain()` produces a first-draft answer to the task.
+2. **Reflect**: `build_reflect_chain()` critiques the draft against the task, and outputs exactly `APPROVAL_TOKEN` ("APPROVED") if there's nothing left to fix.
+3. **Refine**: `build_refine_chain()` rewrites the draft using that critique — skipped once the reflector approves.
+
+Each chain is `prompt | llm | StrOutputParser()`, rebuilt fresh per call since chains are stateless; the loop's only state is the evolving `draft` string. The loop runs until the reflector's output exact-matches `APPROVAL_TOKEN` or `MAX_ITERATIONS` (3) is reached, whichever comes first — the exact-match check (not a substring check) avoids false positives from a critique that mentions the word while still listing problems.
 
 ### Shared Utilities
 

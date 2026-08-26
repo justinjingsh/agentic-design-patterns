@@ -9,12 +9,14 @@ logger = logging.getLogger(__name__)
 CMD_PROMPT_CHAINING: str = "prompt_chaining"
 CMD_ROUTING: str = "routing"
 CMD_PARALLELIZATION: str = "parallelization"
+CMD_REFLECTION: str = "reflection"
 CMD_HELP: str = "help"
 
 EXAMPLES: Dict[str, str] = {
     CMD_PROMPT_CHAINING: "Extract specs and transform to JSON",
     CMD_ROUTING: "Task Cordinator Agent",
     CMD_PARALLELIZATION: "Run tasks in parallel",
+    CMD_REFLECTION: "Self-reflecting agent",
 }
 
 
@@ -31,6 +33,7 @@ def print_help() -> None:
     help_text += "  uv run python -m src.examples prompt_chaining\n"
     help_text += "  uv run python -m src.examples routing\n"
     help_text += "  uv run python -m src.examples parallelization\n"
+    help_text += "  uv run python -m src.examples reflection\n"
 
     print(help_text)
     logger.info("Help text displayed")

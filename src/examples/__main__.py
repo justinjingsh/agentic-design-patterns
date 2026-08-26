@@ -4,7 +4,7 @@ import sys
 import logging
 
 from ..app.config import validate_aws_credentials
-from ..app.cli import CMD_ROUTING, print_help, CMD_PROMPT_CHAINING, CMD_HELP, CMD_PARALLELIZATION
+from ..app.cli import CMD_REFLECTION, CMD_ROUTING, print_help, CMD_PROMPT_CHAINING, CMD_HELP, CMD_PARALLELIZATION
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +35,18 @@ def _run_parallelization() -> None:
     logger.info("Running parallelization example")
     from .parallelization import handle_requests
     handle_requests()
+    
+def _run_reflection() -> None:
+    """Run the reflection example."""
+    logger.info("Running reflection example")
+    from .reflection import handle_requests
+    handle_requests()
 
 COMMANDS = {
     CMD_PROMPT_CHAINING: _run_prompt_chaining,
     CMD_ROUTING: _run_routing,
     CMD_PARALLELIZATION: _run_parallelization,
+    CMD_REFLECTION: _run_reflection,
     CMD_HELP: print_help,
 }
 
