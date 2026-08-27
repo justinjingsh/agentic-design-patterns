@@ -3,7 +3,26 @@
 Demonstrates the Parallelization agentic pattern: several independent LLM
 sub-tasks (summary, sentiment, keyword extraction) run concurrently against
 the same input via RunnableParallel, instead of one after another, and their
-results are merged into a single report.
+results are merged into a single report keyed by sub-task name.
+
+The sub-tasks are safe to run in parallel precisely because none of them
+consumes another's output — they only share the input text. Wall-clock time
+for the whole analysis is therefore the slowest single branch, not the sum
+of all three, and analyze_text() times the call to make that visible.
+
+How this differs from the other patterns in this repo:
+  - prompt_chaining: step 2 depends on step 1, so its calls must be
+    sequential; here the branches are independent.
+  - routing: exactly one branch runs, chosen by the model; here every branch
+    runs and no choice is made.
+  - reflection / planning / tools / multiagent: later steps depend on earlier
+    results, so they cannot be collapsed into one parallel fan-out.
+
+Flow for one text:
+
+    text ── RunnableParallel(summary=..., sentiment=..., keywords=...)
+         ── all three sub-chains dispatched at once (thread pool)
+         ── {"summary": "...", "sentiment": "...", "keywords": "..."}
 """
 
 import logging

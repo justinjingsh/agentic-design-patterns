@@ -7,6 +7,28 @@ outright — a third pass revises the draft using the critique (the "refiner").
 This generate -> reflect -> refine loop repeats up to a fixed number of
 iterations, giving the model a chance to catch and fix its own mistakes
 instead of returning the first thing it produced.
+
+The three roles are kept strictly separate: the reflector only ever judges
+(it never rewrites), and the refiner only ever rewrites (it never re-judges).
+The loop's only state is the evolving ``draft`` string; each pass rebuilds
+its (stateless) chain from scratch.
+
+How this differs from the other patterns in this repo:
+  - prompt_chaining: a fixed number of steps (two); here the step *count* is
+    dynamic — the loop stops as soon as the reflector approves.
+  - routing: one classification decision then done; here the model is
+    re-consulted every iteration.
+  - planning / tools / multiagent: the model chooses *what* to do next; here
+    the sequence of roles is fixed and only the iteration count varies.
+
+Flow for one task:
+
+    task ── generate_chain ──> draft
+         ── loop, up to MAX_ITERATIONS times:
+              reflect_chain(task, draft) ──> critique
+                critique == APPROVAL_TOKEN?  ── yes ──> stop, return draft
+                                             ── no  ──> refine_chain(task, draft, critique) ──> new draft
+         ── return the approved draft, or the last draft if the cap was hit
 """
 
 import logging
@@ -35,7 +57,11 @@ SAMPLE_TASKS: list[str] = [
 
 
 def build_generate_chain() -> Runnable[dict[str, str], str]:
-    """Build the chain that produces the first-draft answer to a task."""
+    """Build the chain that produces the first-draft answer to a task.
+
+    Called once per task, before the loop starts. It is a plain
+    ``prompt | llm | StrOutputParser()`` chain and takes ``{"task": ...}``.
+    """
     generate_prompt = ChatPromptTemplate.from_messages(
         [
             (
@@ -53,7 +79,9 @@ def build_reflect_chain() -> Runnable[dict[str, str], str]:
     """Build the chain that critiques a draft against the original task.
 
     The reflector never rewrites the draft itself — it only ever judges it —
-    which keeps its role distinct from the refine step below.
+    which keeps its role distinct from the refine step below. It takes
+    ``{"task": ..., "draft": ...}`` and returns either exactly
+    ``APPROVAL_TOKEN`` or a short bulleted list of problems to fix.
     """
     reflect_prompt = ChatPromptTemplate.from_messages(
         [
@@ -73,7 +101,12 @@ def build_reflect_chain() -> Runnable[dict[str, str], str]:
 
 
 def build_refine_chain() -> Runnable[dict[str, str], str]:
-    """Build the chain that rewrites a draft using the reflector's critique."""
+    """Build the chain that rewrites a draft using the reflector's critique.
+
+    Takes ``{"task": ..., "draft": ..., "critique": ...}`` and returns the
+    revised draft. Only runs on iterations where the reflector did *not*
+    approve; its output becomes the ``draft`` for the next loop pass.
+    """
     refine_prompt = ChatPromptTemplate.from_messages(
         [
             (
@@ -122,10 +155,15 @@ def run_reflection_loop(task: str) -> str:
             logger.info("Draft approved after %d reflection pass(es)", iteration)
             break
 
+        # Feed the critique back in and overwrite `draft` with the revision —
+        # the next iteration's reflect pass then judges this new draft.
         draft = refine_chain.invoke({"task": task, "draft": draft, "critique": critique})
         print(f"Draft {iteration + 1}:\n{draft.strip()}\n")
         logger.info("Refined draft after reflection pass %d", iteration)
     else:
+        # for/else: this runs only if the loop completed without `break`, i.e.
+        # the reflector never approved within MAX_ITERATIONS. The last refined
+        # draft is still returned as the best available answer.
         logger.info("Reached MAX_ITERATIONS (%d) without approval", MAX_ITERATIONS)
 
     return draft

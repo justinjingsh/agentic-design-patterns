@@ -12,6 +12,9 @@ uv run python -m src.examples prompt_chaining  # Run prompt chaining example
 uv run python -m src.examples routing          # Run rounting example
 uv run python -m src.examples parallelization  # Run parallelization example
 uv run python -m src.examples reflection       # Run reflection example
+uv run python -m src.examples tools            # Run tool use example
+uv run python -m src.examples planning         # Run planning example
+uv run python -m src.examples multiagent       # Run multi-agent collaboration example
 uv run python -m src.examples help             # List all available examples
 ```
 
@@ -32,7 +35,10 @@ src/
 │   ├── prompt_chaining/  # Prompt chaining example
 │   ├── routing/          # Routing example
 │   ├── parallelization/  # Parallelization example
-│   └── reflection/       # Reflection example
+│   ├── reflection/       # Reflection example
+│   ├── planning/         # Planning (plan-and-execute) example
+│   ├── multiagent/       # Multi-agent collaboration example
+│   └── tools/            # Tool use (function calling) example
 ```
 
 ### Key Design Decisions
@@ -120,7 +126,33 @@ Three independent sub-tasks (summary, sentiment, keywords) run concurrently agai
 
 Unlike `prompt_chaining`, the sub-tasks here don't depend on each other's output, which is what makes concurrent execution safe. `analyze_text()` times the call to show that wall-clock reflects the slowest branch, not the sum of all three.
 
-### Reflection Example (`src/examples/reflection/reflection.py`)
+### Routing Example (`src/examples/routing/request_router.py`)
+
+"LLM as classifier + deterministic dispatch." An LLM classifies each request into exactly one of the `HANDLERS` keys (`booker`, `info`) or `unclear`; a `RunnableBranch` then dispatches the *untouched* request text to the plain-Python handler for that category. The model makes one decision and is then out of the loop.
+
+`build_router()` composes a dict-of-runnables `{"category": classifier_chain, "request": passthrough}` (both entries get the same original input) into a `RunnableBranch`. `HANDLERS` is the single source of truth — the branch conditions are generated from it, so adding a category means adding one dict entry. The branch lambdas bind their loop variables via default args (`category=category`, `handler=handler`) to dodge the late-binding closure bug. Handlers take only the raw request string, so routing and handling are fully decoupled.
+
+### Planning Example (`src/examples/planning/task_planner.py`)
+
+The plan-and-execute pattern: split "decide what to do" from "do it." `run_planner()` runs three stages per goal:
+
+1. **Plan**: `build_planner_chain()` (`prompt | llm | StrOutputParser() | _parse_plan`) turns the goal into an ordered `list[str]` of at most `MAX_STEPS` (6) steps. `_parse_plan()` normalises the model's inconsistent list formatting (`1.`, `1)`, `- `, `Step 1:`) and truncates to `MAX_STEPS` rather than raising.
+2. **Execute**: a deterministic loop calls `build_executor_chain()` once per step. Every call also sees the goal, the full plan text (formatted once), and `_format_completed()` — the `(step, result)` pairs done so far.
+3. **Synthesise**: `build_synthesis_chain()` merges all step results into the final answer.
+
+The entire plan is committed to *before* any step runs, unlike the `tools` example where the model picks the next step after seeing the last result. The loop's only state is `completed`. Entry point `handle_requests()` (exported from `__init__.py`), registered as `CMD_PLANNING` / `_run_planning`.
+
+### Multi-Agent Example (`src/examples/multiagent/research_team.py`)
+
+Supervisor-routed collaboration on a shared transcript. `SPECIALISTS` maps each name to `(one-line role summary, full system prompt)` — one dict so the supervisor's menu and the agents can't drift. `run_team()` loops up to `MAX_TURNS` (6):
+
+1. `build_supervisor_chain()` reads the goal + `_format_transcript()` and replies with one specialist name or `DONE_TOKEN`. `_choose_next()` reduces the raw reply to its first word, lower-cased, and maps it to a specialist, `DONE_TOKEN`, or `None` (unrecognised → stop and log).
+2. The chosen specialist's chain (built once per name, reused across turns) runs against the same goal + transcript and appends its `(name, message)` pair.
+3. On `DONE_TOKEN`, `None`, or hitting `MAX_TURNS`, the loop ends.
+
+`build_editor_chain()` then always runs one deterministic final pass over the whole transcript, so output shape is predictable even if the team wandered. Routing between teammates is decided at runtime from the evolving transcript — that's what makes it collaboration, not a fixed fan-out like `parallelization`. Entry point `handle_requests()` (exported from `__init__.py`), registered as `CMD_MULTIAGENT` / `_run_multiagent`.
+
+### Reflection Example (`src/examples/reflection/draft_refiner.py`)
 
 A generate -> reflect -> refine loop, run per task in `run_reflection_loop()`:
 
@@ -129,6 +161,16 @@ A generate -> reflect -> refine loop, run per task in `run_reflection_loop()`:
 3. **Refine**: `build_refine_chain()` rewrites the draft using that critique — skipped once the reflector approves.
 
 Each chain is `prompt | llm | StrOutputParser()`, rebuilt fresh per call since chains are stateless; the loop's only state is the evolving `draft` string. The loop runs until the reflector's output exact-matches `APPROVAL_TOKEN` or `MAX_ITERATIONS` (3) is reached, whichever comes first — the exact-match check (not a substring check) avoids false positives from a critique that mentions the word while still listing problems.
+
+### Tool Use Example (`src/examples/tools/tool_calling_agent.py`)
+
+The Tool Use (function calling) pattern — the first example whose control flow is **not** a fixed LCEL pipeline. The model decides at runtime which tools to call and how many turns to take.
+
+1. **Tools**: three plain functions wrapped with `@tool` (`calculator`, `get_weather`, `word_count`). The decorator turns each function's name, docstring, and type-hinted signature into the JSON schema the model sees — so the docstring is written for the model, not as an internal comment. `calculator` sandboxes `eval` behind a character whitelist plus `{"__builtins__": {}}`; `get_weather` reads a hard-coded offline dict so the example is deterministic. Every tool returns a `str`. `TOOLS` / `TOOLS_BY_NAME` are both derived from one list so they can't drift.
+2. **Loop** (`run_agent()`): `llm.bind_tools(TOOLS)` attaches the schemas (it does not execute anything). The conversation is a growing `list[BaseMessage]` — `SystemMessage`, `HumanMessage`, then alternating `AIMessage` (may carry `.tool_calls`) and `ToolMessage` (our results). Each iteration re-sends the whole list. If an `AIMessage` has no `tool_calls`, that's the final answer and the loop returns. Otherwise every requested call is run, and each result is appended as a `ToolMessage` tagged with the matching `tool_call_id` (critical when several tools run in one turn). Unknown tool names and tool errors are returned as error strings rather than raised, so the model can recover.
+3. **Bounds**: `MAX_STEPS` (5) caps model invocations; hitting it returns a sentinel string instead of raising, so `handle_requests()` continues with the remaining `SAMPLE_QUERIES`. Each query is an independent run with a fresh message list.
+
+This is the case where LangChain's `create_agent` would normally be used; the loop is hand-rolled here so the observe -> decide -> act -> repeat mechanics are visible.
 
 ### Shared Utilities
 
@@ -179,7 +221,7 @@ See `pyproject.toml` for versions and full list.
 
 **Frequently:**
 - `src/examples/*/` — Adding/modifying examples
-- `src/examples/cli.py` — Registering new examples
+- `src/app/cli.py` — Registering new examples (EXAMPLES dict, CMD_* constants)
 - `src/examples/__main__.py` — Adding CLI handlers
 
 **Sometimes:**

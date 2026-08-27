@@ -1,8 +1,26 @@
 """Routing example using AWS Bedrock and LangChain.
 
 Demonstrates the Routing agentic pattern: an LLM classifies each incoming
-request into a category, and a RunnableBranch dispatches the (untouched)
-request to the handler registered for that category.
+request into one of a fixed set of categories, and a RunnableBranch then
+dispatches the *untouched* request to the plain-Python handler registered
+for that category. The model's only job is the one classification decision;
+everything after it is deterministic.
+
+How this differs from the other patterns in this repo:
+  - prompt_chaining: a fixed two-step `|` chain — no decision is made, the
+    steps are always the same.
+  - parallelization: every sub-task runs; here exactly one handler runs and
+    the model picks which.
+  - reflection / planning / tools / multiagent: the model keeps making
+    decisions across multiple turns; here it decides once and is then out of
+    the loop.
+
+Flow for one request:
+
+    request ── {category: classifier_chain, request: passthrough}
+            ── produces {"category": "...", "request": "<original text>"}
+            ── RunnableBranch: first matching category wins, else default
+            ── handler(request)  ──> result string
 """
 
 import logging
@@ -28,21 +46,26 @@ TEST_REQUESTS: list[str] = [
 
 # --- Handlers -------------------------------------------------------------
 # Each handler only cares about the raw request text, not how it was
-# selected — routing and handling are fully decoupled.
+# selected — routing and handling are fully decoupled. In a real system
+# these would call booking APIs, a knowledge base, etc.; here they return a
+# canned string so the routing behaviour is what the example shows.
 
 def booking_handler(request: str) -> str:
+    """Handle any reservation/booking request (flight, hotel, table, ticket)."""
     logger.info("Handling booking request: %s", request)
     # Implement booking logic here
     return "Booking confirmed"
 
 
 def info_handler(request: str) -> str:
+    """Handle any information-lookup request (weather, facts, locations)."""
     logger.info("Handling info request: %s", request)
     # Implement information retrieval logic here
     return "Information provided"
 
 
 def unclear_handler(request: str) -> str:
+    """Fallback for requests the classifier couldn't place in another category."""
     logger.info("Handling unclear request: %s", request)
     # Implement logic for unclear requests here
     return "Request is unclear, please provide more details"

@@ -8,6 +8,9 @@ A collection of design patterns and examples demonstrating how to build agentic 
 - **Routing**: Route user requests to different tasks based on intent
 - **Parallelization**: Run independent LLM sub-tasks (summary, sentiment, keywords) concurrently and merge their results
 - **Reflection**: Generate a draft, critique it, and refine it in a loop so the model catches its own mistakes
+- **Tool Use**: Bind tools (calculator, weather lookup, word count) to the model and run an observe -> decide -> act loop where the model chooses which tools to call
+- **Planning**: Have the model write an explicit ordered plan up front, then execute the steps one at a time and synthesise the results
+- **Multi-Agent**: A supervisor agent routes a shared transcript between single-purpose teammates (researcher, analyst, writer) until an editor compiles the deliverable
 - **AWS Bedrock Integration**: Examples using Claude models via AWS Bedrock
 - **Structured Output**: Demonstrates best practices for validating LLM outputs
 
@@ -18,11 +21,14 @@ The examples in this repo are built directly from **LangChain Expression Languag
 This is intentional: `create_agent` is itself built out of these same LCEL/LangGraph primitives, so writing examples at this lower layer makes each pattern's mechanics visible instead of hiding them behind one call.
 
 - **`prompt_chaining`** (`spec_extractor.py`): a fixed, linear sequence of two LLM calls (extract → transform) composed with `|`. The control flow is deterministic — there's no decision-making about what to do next — so a plain LCEL chain is the right level of abstraction.
-- **`routing`** (`routing/cordinator_agent.py`): the LLM classifies the request into a category; a `RunnableBranch` (a plain conditional, not the LLM) dispatches to hand-written Python handler functions. This is "LLM as classifier + deterministic dispatch," which differs from an autonomous tool-calling agent.
+- **`routing`** (`routing/request_router.py`): the LLM classifies the request into a category; a `RunnableBranch` (a plain conditional, not the LLM) dispatches to hand-written Python handler functions. This is "LLM as classifier + deterministic dispatch," which differs from an autonomous tool-calling agent.
 - **`parallelization`** (`parallelization/text_analysis.py`): three independent LLM sub-tasks (summary, sentiment, keywords) run concurrently against the same input via `RunnableParallel`, and their results are merged into one report. Because the sub-tasks don't depend on each other's output, fanning them out is safe and cuts wall-clock time to roughly the slowest single sub-task instead of the sum of all three.
-- **`reflection`** (`reflection/reflection.py`): a generate -> reflect -> refine loop over three plain LCEL chains. A generator produces a first draft, a reflector critiques it against the task (approving it outright once it's satisfied), and a refiner rewrites the draft using that critique — repeating until approval or a fixed `MAX_ITERATIONS`. The loop itself is hand-written Python, not an agentic tool loop, since the sequence of steps is fixed; only whether to keep iterating is dynamic.
+- **`reflection`** (`reflection/draft_refiner.py`): a generate -> reflect -> refine loop over three plain LCEL chains. A generator produces a first draft, a reflector critiques it against the task (approving it outright once it's satisfied), and a refiner rewrites the draft using that critique — repeating until approval or a fixed `MAX_ITERATIONS`. The loop itself is hand-written Python, not an agentic tool loop, since the sequence of steps is fixed; only whether to keep iterating is dynamic.
+- **`tools`** (`tools/tool_calling_agent.py`): the Tool Use (function calling) pattern. Three `@tool`-decorated functions (`calculator`, `get_weather`, `word_count`) are bound to the model with `llm.bind_tools(...)`. `run_agent()` then drives a hand-written observe -> decide -> act loop: invoke the model over the running message list, execute whatever `tool_calls` it emits, append each result as a `ToolMessage` keyed by `tool_call_id`, and re-invoke — stopping when the model returns an answer with no tool calls or after `MAX_STEPS` (5). Unlike the patterns above, both *which* step runs and *how many* steps run are decided by the model at runtime. The loop is spelled out here (rather than delegated to `create_agent`) so the mechanics are visible.
+- **`planning`** (`planning/task_planner.py`): the plan-and-execute pattern. `build_planner_chain()` turns a goal into an explicit ordered list of at most `MAX_STEPS` (6) sub-steps; `run_planner()` then loops deterministically over that plan, calling `build_executor_chain()` once per step (each call also sees the goal, the full plan, and every earlier step's result), and finally `build_synthesis_chain()` merges the per-step results into the answer. The plan is committed to *before* any step runs — "decide what to do" is split from "do it" — which is the opposite of the `tools` loop, where the model picks the next step only after seeing the last result.
+- **`multiagent`** (`multiagent/research_team.py`): the Multi-Agent collaboration pattern. Three single-purpose agents (`researcher`, `analyst`, `writer`), each with its own persona, share one transcript. `build_supervisor_chain()` is itself an agent: after every turn it reads the goal and the transcript and names the next speaker, or emits `DONE_TOKEN`. `run_team()` loops that up to `MAX_TURNS` (6), then a deterministic `build_editor_chain()` pass compiles the whole transcript into the deliverable. The routing between teammates is decided at runtime from the evolving shared state, which is what makes this collaboration rather than a fixed fan-out like `parallelization`.
 
-**When to reach for `create_agent` instead:** when the LLM itself needs to decide *which* tool(s) to call, possibly in a multi-step loop, reasoning over each result before continuing (e.g., "look up flight prices, then check hotel availability, then answer"). `create_agent` absorbs that observe → decide → act → repeat loop so you don't hand-roll it. It's less suited to cases like this repo's routing example, where dispatch is deterministic and fixed by a lookup map rather than left to the model's judgment.
+**When to reach for `create_agent` instead:** when the LLM itself needs to decide *which* tool(s) to call, possibly in a multi-step loop, reasoning over each result before continuing (e.g., "look up flight prices, then check hotel availability, then answer"). `create_agent` absorbs that observe → decide → act → repeat loop so you don't hand-roll it — the `tools` example above hand-rolls exactly that loop on purpose, to show what `create_agent` would otherwise hide. It's less suited to cases like this repo's routing example, where dispatch is deterministic and fixed by a lookup map rather than left to the model's judgment.
 
 ## Prerequisites
 
@@ -81,6 +87,15 @@ uv run python -m src.examples parallelization
 # Run the reflection example
 uv run python -m src.examples reflection
 
+# Run the tool use example
+uv run python -m src.examples tools
+
+# Run the planning example
+uv run python -m src.examples planning
+
+# Run the multi-agent collaboration example
+uv run python -m src.examples multiagent
+
 # Show available examples and usage
 uv run python -m src.examples help
 ```
@@ -120,13 +135,22 @@ agentic-design-patterns/
 │       │   └── spec_extractor.py   # Spec extraction and JSON transformation
 │       ├── routing/                # Routing example
 │       │   ├── __init__.py
-│       │   └── task_cordinator_agent.py  # Task routing and orchestration
+│       │   └── request_router.py   # Classify a request and dispatch to a handler
 │       ├── parallelization/        # Parallelization example
 │       │   ├── __init__.py
 │       │   └── text_analysis.py    # Concurrent summary/sentiment/keyword analysis
-│       └── reflection/             # Reflection example
+│       ├── reflection/             # Reflection example
+│       │   ├── __init__.py
+│       │   └── draft_refiner.py    # Generate -> reflect -> refine loop
+│       ├── planning/               # Planning example
+│       │   ├── __init__.py
+│       │   └── task_planner.py     # Decompose a goal into steps, then execute them
+│       ├── multiagent/             # Multi-agent collaboration example
+│       │   ├── __init__.py
+│       │   └── research_team.py    # Supervisor-routed researcher/analyst/writer team
+│       └── tools/                  # Tool use (function calling) example
 │           ├── __init__.py
-│           └── reflection.py       # Generate -> reflect -> refine loop
+│           └── tool_calling_agent.py  # bind_tools + observe/decide/act loop
 │
 ├── app.py                          # Entry point wrapper
 ├── pyproject.toml                  # Project configuration and dependencies
