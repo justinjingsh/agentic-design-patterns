@@ -31,7 +31,7 @@ from typing import Any
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import Runnable, RunnableParallel
-from ...app.bedrock import llm
+from ....app.bedrock import llm
 
 logger = logging.getLogger(__name__)
 

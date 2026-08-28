@@ -4,7 +4,7 @@ import json
 from unittest.mock import patch, MagicMock
 import pytest
 from langchain_core.runnables import Runnable
-from src.examples.prompt_chaining.spec_extractor import RAW_TEXTS
+from src.examples.core_patterns.prompt_chaining.spec_extractor import RAW_TEXTS
 
 
 class TestChainConstruction:
@@ -12,7 +12,7 @@ class TestChainConstruction:
 
 	def test_build_chain_returns_two_runnables(self):
 		"""Test that build_chain returns a tuple of two runnables."""
-		from src.examples.prompt_chaining.spec_extractor import build_chain
+		from src.examples.core_patterns.prompt_chaining.spec_extractor import build_chain
 		extraction_chain, transformation_chain = build_chain()
 		assert isinstance(extraction_chain, Runnable)
 		assert isinstance(transformation_chain, Runnable)
@@ -30,7 +30,7 @@ class TestRunAndValidate:
 
 	def test_run_and_validate_with_valid_json(self, capsys):
 		"""Test run_and_validate with valid JSON output."""
-		from src.examples.prompt_chaining.spec_extractor import run_and_validate
+		from src.examples.core_patterns.prompt_chaining.spec_extractor import run_and_validate
 
 		extraction_chain = MagicMock()
 		transformation_chain = MagicMock()
@@ -48,7 +48,7 @@ class TestRunAndValidate:
 
 	def test_run_and_validate_with_invalid_json(self, capsys):
 		"""Test run_and_validate handles invalid JSON gracefully."""
-		from src.examples.prompt_chaining.spec_extractor import run_and_validate
+		from src.examples.core_patterns.prompt_chaining.spec_extractor import run_and_validate
 
 		extraction_chain = MagicMock()
 		transformation_chain = MagicMock()
@@ -64,7 +64,7 @@ class TestRunAndValidate:
 
 	def test_run_and_validate_invokes_chains(self):
 		"""Test that run_and_validate invokes both chains with correct inputs."""
-		from src.examples.prompt_chaining.spec_extractor import run_and_validate
+		from src.examples.core_patterns.prompt_chaining.spec_extractor import run_and_validate
 
 		extraction_chain = MagicMock()
 		transformation_chain = MagicMock()

@@ -13,6 +13,8 @@ CMD_REFLECTION: str = "reflection"
 CMD_TOOLS: str = "tools"
 CMD_PLANNING: str = "planning"
 CMD_MULTIAGENT: str = "multiagent"
+CMD_STATE: str = "state"
+CMD_GOAL_MONITORING: str = "goal_monitoring"
 CMD_HELP: str = "help"
 
 EXAMPLES: Dict[str, str] = {
@@ -23,6 +25,8 @@ EXAMPLES: Dict[str, str] = {
     CMD_TOOLS: "Tool usage agent",
     CMD_PLANNING: "Planning agent",
     CMD_MULTIAGENT: "Multi-agent collaboration",
+    CMD_STATE: "State management across turns (short-term, summary, long-term memory)",
+    CMD_GOAL_MONITORING: "Goal setting and monitoring against measurable criteria",
 }
 
 
@@ -43,6 +47,8 @@ def print_help() -> None:
     help_text += "  uv run python -m src.examples tools\n"
     help_text += "  uv run python -m src.examples planning\n"
     help_text += "  uv run python -m src.examples multiagent\n"
+    help_text += "  uv run python -m src.examples state\n"
+    help_text += "  uv run python -m src.examples goal_monitoring\n"
 
     print(help_text)
     logger.info("Help text displayed")

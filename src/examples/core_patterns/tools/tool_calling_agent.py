@@ -55,7 +55,7 @@ from langchain_core.tools import tool
 
 # Shared ChatBedrock instance, constructed once at import time in
 # src/app/bedrock.py (which also validates AWS credentials at module scope).
-from ...app.bedrock import llm
+from ....app.bedrock import llm
 
 logger = logging.getLogger(__name__)
 

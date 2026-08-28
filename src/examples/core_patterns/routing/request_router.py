@@ -28,7 +28,7 @@ from typing import Callable
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import Runnable, RunnableBranch, RunnableLambda
-from ...app.bedrock import llm
+from ....app.bedrock import llm
 
 
 logger = logging.getLogger(__name__)
