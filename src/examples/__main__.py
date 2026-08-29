@@ -5,11 +5,15 @@ import logging
 
 from ..app.config import validate_aws_credentials
 from ..app.cli import (
+    CMD_A2A,
+    CMD_EXCEPTION_HANDLING,
     CMD_HELP,
+    CMD_HITL,
     CMD_MULTIAGENT,
     CMD_PARALLELIZATION,
     CMD_PLANNING,
     CMD_PROMPT_CHAINING,
+    CMD_RAG,
     CMD_REFLECTION,
     CMD_GOAL_MONITORING,
     CMD_ROUTING,
@@ -84,6 +88,30 @@ def _run_goal_monitoring() -> None:
     from .state_layers.goal_monitoring import handle_requests
     handle_requests()
 
+def _run_exception_handling() -> None:
+    """Run the exception handling example."""
+    logger.info("Running exception handling example")
+    from .reliability_layers.exception_handling import handle_requests
+    handle_requests()
+
+def _run_hitl() -> None:
+    """Run the human-in-the-loop example."""
+    logger.info("Running human-in-the-loop example")
+    from .reliability_layers.hitl import handle_requests
+    handle_requests()
+
+def _run_rag() -> None:
+    """Run the retrieval-augmented generation example."""
+    logger.info("Running retrieval-augmented generation example")
+    from .reliability_layers.rag import handle_requests
+    handle_requests()
+
+def _run_a2a() -> None:
+    """Run the agent-to-agent example."""
+    logger.info("Running agent-to-agent example")
+    from .production_patterns.a2a import handle_requests
+    handle_requests()
+
 COMMANDS = {
     CMD_PROMPT_CHAINING: _run_prompt_chaining,
     CMD_ROUTING: _run_routing,
@@ -94,6 +122,10 @@ COMMANDS = {
     CMD_MULTIAGENT: _run_multiagent,
     CMD_STATE: _run_state,
     CMD_GOAL_MONITORING: _run_goal_monitoring,
+    CMD_EXCEPTION_HANDLING: _run_exception_handling,
+    CMD_HITL: _run_hitl,
+    CMD_RAG: _run_rag,
+    CMD_A2A: _run_a2a,
     CMD_HELP: print_help,
 }
 

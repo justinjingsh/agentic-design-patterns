@@ -17,6 +17,10 @@ uv run python -m src.examples planning         # Run planning example
 uv run python -m src.examples multiagent       # Run multi-agent collaboration example
 uv run python -m src.examples state            # Run state management example
 uv run python -m src.examples goal_monitoring  # Run goal setting and monitoring example
+uv run python -m src.examples exception_handling  # Run exception handling example
+uv run python -m src.examples hitl             # Run human-in-the-loop example
+uv run python -m src.examples rag              # Run retrieval-augmented generation example
+uv run python -m src.examples a2a              # Run agent-to-agent (A2A) collaboration example
 uv run python -m src.examples help             # List all available examples
 ```
 
@@ -42,9 +46,15 @@ src/
 │   │   ├── planning/         # Planning (plan-and-execute) example
 │   │   ├── multiagent/       # Multi-agent collaboration example
 │   │   └── tools/            # Tool use (function calling) example
-│   └── state_layers/     # State-layer pattern modules
-│       ├── state/            # State management example
-│       └── goal_monitoring/  # Goal setting and monitoring example
+│   ├── state_layers/     # State-layer pattern modules
+│   │   ├── state/            # State management example
+│   │   └── goal_monitoring/  # Goal setting and monitoring example
+│   ├── reliability_layers/   # Reliability-layer pattern modules
+│   │   ├── exception_handling/  # Exception handling / error recovery example
+│   │   ├── hitl/                # Human-in-the-loop approval gate example
+│   │   └── rag/                 # Retrieval-augmented generation example
+│   └── production_patterns/  # Production-pattern modules
+│       └── a2a/                 # Agent-to-Agent protocol (discovery + task delegation) example
 ```
 
 ### Key Design Decisions
@@ -206,6 +216,54 @@ Two halves:
 `run_goal_loop()` loops up to `MAX_ITERATIONS` (4): `build_worker_chain()` re-produces the *whole* work product from `(goal, criteria, previous draft, feedback)`; the monitor scores it; if `met_count == len(criteria)` the loop breaks (success), otherwise `_format_feedback()` turns the still-unmet lines into the next attempt's targeted feedback. The `for/else` handles the give-up path — cap hit with criteria still failing, draft + partial progress returned anyway. Loop state is just the `draft` string plus the latest `progress` list.
 
 Contrast: `planning` commits to a fixed ordered step list and runs it once; here there is no step list, the task is re-attempted whole each round, steered only by which criteria still fail. `reflection` uses a free-form prose critic; here the critic is pinned to a fixed, goal-derived checklist so progress is a countable "N of M met". Entry point `handle_requests()` (exported from `__init__.py`), registered as `CMD_GOAL_MONITORING` / `_run_goal_monitoring`.
+
+### Exception Handling Example (`src/examples/reliability_layers/exception_handling/resilient_agent.py`)
+
+The Exception Handling (error recovery / resilience) pattern: the same hand-rolled tool-calling loop as `tools`, but every tool execution is wrapped in a recovery ladder so a failing tool degrades the answer instead of aborting the run. This is the first module under `reliability_layers/`.
+
+1. **Failure taxonomy**: tools raise `TransientError` (timeout / rate-limit / flaky I/O — a retry might help) or `PermanentError` (bad input, missing resource, auth — a retry won't). `ToolError` is their shared base. Anything else that escapes a tool is caught by a catch-all in `_attempt_with_retries()`, logged with a stack trace, and re-wrapped as `PermanentError`, so callers only ever handle `ToolError` and the loop can't be killed by a surprise exception.
+2. **Recovery ladder** in `call_tool_with_recovery()` (never raises, always returns a string):
+   - `_attempt_with_retries()` runs the tool, retrying only `TransientError` up to `MAX_RETRIES` (3) times with exponential backoff (`BACKOFF_BASE_SECONDS` (0.5) `* 2 ** (attempt - 1)`); `PermanentError` skips straight past.
+   - On unrecoverable failure, if `FALLBACKS` names an alternative tool (`fetch_stock_price` → `fetch_stock_price_backup`), call that instead — transparently, with its own retry budget. The fallback tool is deliberately *not* in `PRIMARY_TOOLS` (the set bound to the model), only in `TOOLS_BY_NAME`, so the model never reasons about which data source is up.
+   - Otherwise (or if the fallback also fails) `_degraded()` returns a `TOOL_UNAVAILABLE: ...` note (`UNAVAILABLE_PREFIX`). The system prompt tells the model to answer with what it has and flag the gap; results tagged `[fallback: ...]` / `(delayed)` are flagged as possibly stale.
+3. **Deterministic flakiness**: the offline tools script their failures via a module-level `_price_calls` counter (`fetch_stock_price` "times out" `_TRANSIENT_FAILURES` (2) times per ticker, then succeeds), so every run fails and recovers in the same places. The three `SAMPLE_QUERIES` each drive one branch: retry-then-succeed (ADP), permanent-then-fallback (GLOBEX, absent from the primary feed), and unexpected-error-then-degrade (`get_market_news` raises a bare `RuntimeError`, no fallback). `_price_calls` intentionally persists across queries — once a ticker is "warmed up" the feed keeps succeeding.
+
+`run_agent()` is structurally identical to the `tools` example's — a bounded observe → decide → act loop over a growing message list — except tool calls go through `call_tool_with_recovery()`. Contrast: `reflection` / `goal_monitoring` recover from a *low-quality* result by iterating; here the concern is a step that *fails outright* — no output to critique, just an exception to classify and route. Entry point `handle_requests()` (exported from `__init__.py`), registered as `CMD_EXCEPTION_HANDLING` / `_run_exception_handling`.
+
+### Human-in-the-Loop Example (`src/examples/reliability_layers/hitl/approval_agent.py`)
+
+The Human-in-the-Loop pattern: the same hand-rolled tool-calling loop as `tools`, but a **fixed policy** intercepts every *side-effecting* tool call and pauses for a human decision before it runs. Second module under `reliability_layers/`.
+
+1. **Review gate**: `SENSITIVE_TOOLS` (`book_flight`, `send_email`, `cancel_booking`) — the ones that spend money, send external mail, or are irreversible — are never executed directly. `search_flights` / `get_fare_rules` are read-only and run automatically. Membership is a policy set, not the model's call.
+2. **The `Reviewer`**: a one-method protocol (`decide(*, tool_name, args, prompt) -> ReviewDecision`). `ReviewDecision.action` is `APPROVE` (run as proposed), `EDIT` (run with `edited_args` instead), `REJECT` (don't run; `message` is the reason), or `ANSWER` (reply to a `request_human_input` question). Two implementations: `ScriptedReviewer` replays canned decisions keyed by tool name (FIFO) so the CLI runs unattended and deterministically — same idea as `exception_handling`'s scripted flakiness; `ConsoleReviewer` blocks on `input()` for a real person and is *not* wired into `handle_requests()` (swap it in via `run_agent(query, ConsoleReviewer())`). Exhausting a script falls back to the safe default: deny a sensitive call, tell the model to use its judgement on a question.
+3. **`request_human_input`** is a real bound tool the model can choose when a request is under-specified; the loop special-cases its "execution" to `reviewer.decide(...)` and feeds the answer back as `HUMAN_RESPONSE: ...`.
+4. **`_dispatch_call(call, reviewer)`** (always returns a string — a rejection is a *result*, not an error) routes each call: `ASK_HUMAN_TOOL` → reviewer → `HUMAN_RESPONSE: ...`; non-sensitive → run now; sensitive → reviewer, then `REJECT` → `HUMAN_REJECTED: <reason>` (system prompt tells the model not to retry or route around it), `EDIT` → run with the human's args, prefixed `HUMAN_EDITED: ...`, `APPROVE` → run with original args. The prefixes are conventions the system prompt explains, nothing parses them.
+
+`run_agent(query, reviewer)` is structurally identical to the `tools` loop; only the per-call dispatch changed. `SAMPLE_SESSIONS` pairs each request with the script its reviewer replays, one per branch: approve a booking, edit an email's args before sending, reject a cancellation, and clarify an under-specified request via `request_human_input`. Contrast: `exception_handling` also wraps each tool call, but to recover from one that *fails* — here the call would succeed and the point is that it shouldn't happen without a person; `reflection` / `goal_monitoring` put an automated critic *after* the output, here a human gates *before* the action. Entry point `handle_requests()` (exported from `__init__.py`), registered as `CMD_HITL` / `_run_hitl`.
+
+### Retrieval-Augmented Generation Example (`src/examples/reliability_layers/rag/rag_pipeline.py`)
+
+The RAG (Knowledge Retrieval) pattern: before the model answers, a deterministic retrieval step pulls the most relevant passages out of a knowledge base and injects them into the prompt; the model is instructed to answer *only* from those passages, cite each claim with a `[n]`, and emit exactly `INSUFFICIENT_CONTEXT_TOKEN` ("INSUFFICIENT_CONTEXT") when the sources don't hold the answer. Third module under `reliability_layers/` — grounding is treated as a reliability property (faithfulness, attribution, honest refusal, freshness), not just a convenience.
+
+Fixed three-stage pipeline in `run_rag()` — the model makes no control-flow decisions:
+
+1. **RETRIEVE** — `retrieve()` scores every `Document` in `KNOWLEDGE_BASE` by lexical overlap (`_score()` = count of distinct query terms appearing in the doc, title terms counted twice), keeps the top `MAX_CONTEXT_DOCS` (3) whose score clears `MIN_RETRIEVAL_SCORE` (1), ties broken on `doc_id`. Zero hits short-circuits to a refusal with no LLM call. `_tokenize()` lower-cases, splits on `[a-z0-9]+`, and drops `_STOPWORDS` plus 1-char tokens. This lexical retriever stands in for embeddings + a vector store; the retrieve → augment → generate shape is what the example is about.
+2. **AUGMENT** — `_format_sources()` renders the retrieved passages as a numbered `[n] title\ntext` block. Those `[n]` labels are what the model cites and what `_check_citations()` validates against.
+3. **GENERATE** — `build_answer_chain()` (`prompt | llm | StrOutputParser()`, stateless, rebuilt per run) answers from that block. An exact-match check on `INSUFFICIENT_CONTEXT_TOKEN` (not substring, same rationale as `reflection`'s `APPROVAL_TOKEN`) routes the refusal path. `_check_citations()` then returns any cited `[n]` outside the retrieved range — a grounding smell that's logged and printed but not hard-failed (lenient parsing, like `planning`'s `_parse_plan`).
+
+`KNOWLEDGE_BASE` is a hard-coded list of short product-doc `Document`s; `SAMPLE_QUESTIONS` drive one outcome each: single-doc answer, multi-doc synthesis (answer should cite two sources), and out-of-scope (retrieval weak/irrelevant → `INSUFFICIENT_CONTEXT`). Contrast: `tools` lets the *model* decide to fetch data and with what args; here retrieval is a fixed pre-step. `exception_handling` / `hitl` wrap a tool loop to recover from failure / gate a side effect; RAG has no tool loop — it grounds a single-shot answer and declines when grounding is missing. `reflection` / `goal_monitoring` iterate on a weak answer; RAG changes what the model is *given* before it writes. Entry point `handle_requests()` (exported from `__init__.py`), registered as `CMD_RAG` / `_run_rag`.
+
+### Agent-to-Agent Example (`src/examples/production_patterns/a2a/a2a_orchestrator.py`)
+
+The Agent-to-Agent (A2A) pattern: capabilities live in independent *services*, each publishing a machine-readable **Agent Card** (`name`, `description`, `skills`). A client **orchestrator** discovers those cards at runtime, dispatches to the one whose skills fit the request, and delegates by sending a `Message` over a transport; the remote agent runs the job as a `Task` with an explicit lifecycle and returns structured `history` + `artifacts`. First module under `production_patterns/`.
+
+- **Protocol vocabulary**: `Task` states are plain string constants — `SUBMITTED` → `WORKING` → `COMPLETED` | `INPUT_REQUIRED` | `FAILED`. `AgentCard`, `Message` (`role` = `"user"`/`"agent"`), `Artifact` (named string), and `HandlerResult` (exactly one of `answer` → COMPLETED or `question` → INPUT_REQUIRED; a raise → FAILED) are all `@dataclass`es.
+- **Remote-agent side**: `RemoteAgentService` wraps a card + a `Handler` (`str -> HandlerResult`) and drives the lifecycle in `execute()` — it prints every state transition and *never raises* (a failed task is a return value). Two demo agents, each grounding a `_phrase_chain()` LLM call in a hard-coded table: `_fx_handler` (`_RATES_TO_USD`, `_find_amount`/`_find_currencies` lenient parsing; computes the number in Python, LLM only phrases it; asks `INPUT_REQUIRED` when amount or a second currency is missing) and `_weather_handler` (`_FORECASTS` by city; `INPUT_REQUIRED` when no known city is named).
+- **Registry + transport**: `AgentRegistry` (`register` / `discover` → cards only / `connect` → `RemoteConnection`) stands in for a discovery service; `RemoteConnection.send(message, task=None)` is the wire — a direct call here, an HTTP POST in production. The orchestrator only ever touches cards and the returned `Task`.
+- **Orchestrator side** (`run_orchestrator`): `build_dispatch_chain()` picks one card name or exactly `NO_AGENT_TOKEN` (`"NONE"`); `_first_token()` normalises the reply and an unknown name routes to `_decline()`. `build_request_chain()` crafts the `Message` to send. On `INPUT_REQUIRED`, `build_followup_chain()` answers the agent's question (picking a stated default when the user never supplied the detail) and re-sends against the **same** `task_id`, up to `MAX_ROUNDS` (3). On `COMPLETED`, `build_synthesis_chain()` relays the result. Loop state is just the current `Task` handle and the last `Message`.
+- **`SAMPLE_REQUESTS`** drive one path each: clean delegation (fx) → completed; a different agent (weather) → completed; under-specified ("Convert 300 into Japanese yen") → `INPUT_REQUIRED` → orchestrator supplies `USD` default → completed; and a request no card covers → orchestrator declines.
+
+Contrast: `multiagent` routes between personas sharing one in-process transcript; A2A puts each agent behind a card + transport and delegates a task envelope that can pause for input. `routing` classifies once then dispatches to a *local* handler; A2A's target is a remote service with its own lifecycle. `tools` calls in-process functions whose schemas the model knows up front; A2A *discovers* capabilities from cards at runtime. Entry point `handle_requests()` (exported from `__init__.py`), registered as `CMD_A2A` / `_run_a2a`.
 
 ### Shared Utilities
 

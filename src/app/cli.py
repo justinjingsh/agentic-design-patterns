@@ -15,6 +15,10 @@ CMD_PLANNING: str = "planning"
 CMD_MULTIAGENT: str = "multiagent"
 CMD_STATE: str = "state"
 CMD_GOAL_MONITORING: str = "goal_monitoring"
+CMD_EXCEPTION_HANDLING: str = "exception_handling"
+CMD_HITL: str = "hitl"
+CMD_RAG: str = "rag"
+CMD_A2A: str = "a2a"
 CMD_HELP: str = "help"
 
 EXAMPLES: Dict[str, str] = {
@@ -27,6 +31,10 @@ EXAMPLES: Dict[str, str] = {
     CMD_MULTIAGENT: "Multi-agent collaboration",
     CMD_STATE: "State management across turns (short-term, summary, long-term memory)",
     CMD_GOAL_MONITORING: "Goal setting and monitoring against measurable criteria",
+    CMD_EXCEPTION_HANDLING: "Recover from tool failures (retry, fallback, graceful degradation)",
+    CMD_HITL: "Human-in-the-loop approval gate on side-effecting tool calls",
+    CMD_RAG: "Retrieval-augmented generation: ground answers in a document corpus, cite sources, decline when unsupported",
+    CMD_A2A: "Agent-to-Agent protocol: discover remote agents by card, delegate tasks over a transport with a lifecycle",
 }
 
 
@@ -49,6 +57,10 @@ def print_help() -> None:
     help_text += "  uv run python -m src.examples multiagent\n"
     help_text += "  uv run python -m src.examples state\n"
     help_text += "  uv run python -m src.examples goal_monitoring\n"
+    help_text += "  uv run python -m src.examples exception_handling\n"
+    help_text += "  uv run python -m src.examples hitl\n"
+    help_text += "  uv run python -m src.examples rag\n"
+    help_text += "  uv run python -m src.examples a2a\n"
 
     print(help_text)
     logger.info("Help text displayed")

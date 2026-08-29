@@ -13,6 +13,8 @@ A collection of design patterns and examples demonstrating how to build agentic 
 - **Multi-Agent**: A supervisor agent routes a shared transcript between single-purpose teammates (researcher, analyst, writer) until an editor compiles the deliverable
 - **State Management**: Thread one structured `ConversationState` through every turn, keeping short-term (verbatim), compressed (rolling summary), and long-term (key/value facts) memory each with its own retention policy
 - **Goal Setting and Monitoring**: Turn a fuzzy goal into a checklist of measurable success criteria, then loop work → monitor-against-criteria → targeted retry until every criterion is met or an iteration cap is hit
+- **Exception Handling**: Harden the tool-calling loop against failing tools — classify each failure as transient or permanent, retry transient ones with exponential backoff, fall back to an alternative source, and degrade gracefully so one broken tool never aborts the run
+- **Human-in-the-Loop**: Gate side-effecting tool calls (book, email, cancel) behind a human who can approve, edit the arguments, or reject — and let the agent ask a clarifying question instead of guessing
 - **AWS Bedrock Integration**: Examples using Claude models via AWS Bedrock
 - **Structured Output**: Demonstrates best practices for validating LLM outputs
 
@@ -31,6 +33,9 @@ This is intentional: `create_agent` is itself built out of these same LCEL/LangG
 - **`multiagent`** (`multiagent/research_team.py`): the Multi-Agent collaboration pattern. Three single-purpose agents (`researcher`, `analyst`, `writer`), each with its own persona, share one transcript. `build_supervisor_chain()` is itself an agent: after every turn it reads the goal and the transcript and names the next speaker, or emits `DONE_TOKEN`. `run_team()` loops that up to `MAX_TURNS` (6), then a deterministic `build_editor_chain()` pass compiles the whole transcript into the deliverable. The routing between teammates is decided at runtime from the evolving shared state, which is what makes this collaboration rather than a fixed fan-out like `parallelization`.
 - **`state`** (`state_layers/state/state_manager.py`): the State Management pattern. A single `ConversationState` dataclass (`facts` dict, `summary` string, `recent` list) is threaded through a scripted multi-turn conversation. Each turn runs a fixed four-step cycle — RETRIEVE (flatten state into prompt context), RESPOND (`build_respond_chain()`), RECORD (append the exchange to `recent`), UPDATE (`build_fact_chain()` promotes durable facts into `facts`; `_compress_recent()` evicts turns past `MAX_RECENT_TURNS` and folds each into `summary` via `build_summary_chain()`). The step sequence never varies; what the example shows is how information is *retained, compressed, and promoted* between the three memory tiers so a late turn can still answer from a fact first mentioned before the verbatim window slid past it.
 - **`goal_monitoring`** (`state_layers/goal_monitoring/goal_tracker.py`): the Goal Setting and Monitoring pattern. `build_criteria_chain()` turns a goal into a numbered checklist of atomic, objectively-verifiable success criteria (the *goal setting* half). `run_goal_loop()` then loops up to `MAX_ITERATIONS` (4): `build_worker_chain()` (re)produces the whole work product, then `build_monitor_chain()` scores it criterion-by-criterion as `MET` / `UNMET` + reason (the *monitoring* half), `_parse_progress()` turns that into structured verdicts, and the still-unmet lines become the next attempt's feedback. The loop exits the moment every criterion is `MET`, or gives up at the cap and reports which criteria still fail. Unlike `planning` (fixed step list, executed once) the task is re-attempted whole each round; unlike `reflection` (free-form critique) progress is a countable "N of M criteria met" measured against a fixed, goal-derived checklist.
+- **`exception_handling`** (`reliability_layers/exception_handling/resilient_agent.py`): the Exception Handling / error-recovery pattern. `run_agent()` is the same bounded observe → decide → act tool-calling loop as `tools`, but each tool call goes through `call_tool_with_recovery()`, which never raises. Tools raise `TransientError` or `PermanentError` (shared base `ToolError`); anything else is caught and re-wrapped as permanent. The ladder: `_attempt_with_retries()` retries only transient failures up to `MAX_RETRIES` (3) with exponential backoff; on an unrecoverable failure the driver consults `FALLBACKS` and transparently calls an alternative tool (the backup is absent from the model-visible `PRIMARY_TOOLS`); if that too fails, `_degraded()` returns a `TOOL_UNAVAILABLE: ...` note the model is told to work around. Failures are scripted (a call counter), so every run recovers in the same places. Where `reflection` / `goal_monitoring` iterate on a *weak* result, this pattern handles a step that *fails outright*.
+- **`hitl`** (`reliability_layers/hitl/approval_agent.py`): the Human-in-the-Loop pattern. Same bounded tool-calling loop as `tools`, but each call goes through `_dispatch_call()`, which pauses side-effecting tools (`SENSITIVE_TOOLS` = `book_flight` / `send_email` / `cancel_booking`) for a human before they run; read-only tools run automatically. The human returns a `ReviewDecision` — `APPROVE` (run as proposed), `EDIT` (run with the human's arguments, tagged `HUMAN_EDITED:`), or `REJECT` (never runs, tagged `HUMAN_REJECTED:` — the model is told not to retry or route around it). The agent can also call `request_human_input` to ask a clarifying question instead of guessing. The `Reviewer` is a one-method protocol: `ScriptedReviewer` replays canned decisions so the demo runs unattended and deterministically; `ConsoleReviewer` blocks on `input()` for a real person. Where `exception_handling` wraps a call to recover from *failure*, this gate stops a call that would *succeed* from happening without sign-off.
+- **`rag`** (`reliability_layers/rag/rag_pipeline.py`): the Retrieval-Augmented Generation (Knowledge Retrieval) pattern. `run_rag()` is a fixed three-stage pipeline with no model-driven control flow: RETRIEVE (`retrieve()` scores every `Document` in `KNOWLEDGE_BASE` by lexical term overlap — a deterministic stand-in for embeddings + a vector store — and keeps the top `MAX_CONTEXT_DOCS` (3) above `MIN_RETRIEVAL_SCORE` (1); zero hits short-circuits to a refusal with no LLM call), AUGMENT (`_format_sources()` renders them as a numbered `[n]` SOURCES block), GENERATE (`build_answer_chain()` answers *only* from that block, cites each claim `[n]`, or emits exactly `INSUFFICIENT_CONTEXT` when the sources don't hold the answer). A deterministic `_check_citations()` post-check flags any `[n]` outside the retrieved set. The grounding is the reliability property — faithfulness, attribution, and an honest refusal when nothing relevant is retrieved. Unlike `tools`, where the model decides to fetch data and with what arguments, retrieval here is a fixed pre-step; unlike `exception_handling` / `hitl` there is no tool loop at all.
 
 **When to reach for `create_agent` instead:** when the LLM itself needs to decide *which* tool(s) to call, possibly in a multi-step loop, reasoning over each result before continuing (e.g., "look up flight prices, then check hotel availability, then answer"). `create_agent` absorbs that observe → decide → act → repeat loop so you don't hand-roll it — the `tools` example above hand-rolls exactly that loop on purpose, to show what `create_agent` would otherwise hide. It's less suited to cases like this repo's routing example, where dispatch is deterministic and fixed by a lookup map rather than left to the model's judgment.
 
@@ -106,6 +111,15 @@ uv run python -m src.examples state
 # Run the goal setting and monitoring example
 uv run python -m src.examples goal_monitoring
 
+# Run the exception handling example
+uv run python -m src.examples exception_handling
+
+# Run the human-in-the-loop example
+uv run python -m src.examples hitl
+
+# Run the retrieval-augmented generation example
+uv run python -m src.examples rag
+
 # Show available examples and usage
 uv run python -m src.examples help
 ```
@@ -163,14 +177,25 @@ agentic-design-patterns/
 │           └── tools/              # Tool use (function calling) example
 │               ├── __init__.py
 │               └── tool_calling_agent.py  # bind_tools + observe/decide/act loop
-│       └── state_layers/          # State-layer pattern modules
+│       ├── state_layers/          # State-layer pattern modules
+│       │   ├── __init__.py
+│       │   ├── state/             # State management example
+│       │   │   ├── __init__.py
+│       │   │   └── state_manager.py    # One ConversationState threaded through every turn
+│       │   └── goal_monitoring/   # Goal setting and monitoring example
+│       │       ├── __init__.py
+│       │       └── goal_tracker.py     # Goal -> criteria checklist -> work/monitor loop
+│       └── reliability_layers/    # Reliability-layer pattern modules
 │           ├── __init__.py
-│           ├── state/             # State management example
+│           ├── exception_handling/  # Exception handling / error recovery example
 │           │   ├── __init__.py
-│           │   └── state_manager.py    # One ConversationState threaded through every turn
-│           └── goal_monitoring/   # Goal setting and monitoring example
+│           │   └── resilient_agent.py  # retry -> fallback -> graceful degradation ladder
+│           ├── hitl/                # Human-in-the-loop approval gate example
+│           │   ├── __init__.py
+│           │   └── approval_agent.py   # approve / edit / reject gate on side-effecting tools
+│           └── rag/                 # Retrieval-augmented generation example
 │               ├── __init__.py
-│               └── goal_tracker.py     # Goal -> criteria checklist -> work/monitor loop
+│               └── rag_pipeline.py     # retrieve -> augment -> generate, grounded + cited answers
 │
 ├── app.py                          # Entry point wrapper
 ├── pyproject.toml                  # Project configuration and dependencies
