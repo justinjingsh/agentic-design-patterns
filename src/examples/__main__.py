@@ -14,6 +14,7 @@ from ..app.cli import (
     CMD_PLANNING,
     CMD_PROMPT_CHAINING,
     CMD_RAG,
+    CMD_RESOURCE_OPTIMIZATION,
     CMD_REFLECTION,
     CMD_GOAL_MONITORING,
     CMD_ROUTING,
@@ -112,6 +113,12 @@ def _run_a2a() -> None:
     from .production_patterns.a2a import handle_requests
     handle_requests()
 
+def _run_resource_optimization() -> None:
+    """Run the resource optimization example."""
+    logger.info("Running resource optimization example")
+    from .production_patterns.resource_optimization import handle_requests
+    handle_requests()
+
 COMMANDS = {
     CMD_PROMPT_CHAINING: _run_prompt_chaining,
     CMD_ROUTING: _run_routing,
@@ -126,6 +133,7 @@ COMMANDS = {
     CMD_HITL: _run_hitl,
     CMD_RAG: _run_rag,
     CMD_A2A: _run_a2a,
+    CMD_RESOURCE_OPTIMIZATION: _run_resource_optimization,
     CMD_HELP: print_help,
 }
 

@@ -19,6 +19,7 @@ CMD_EXCEPTION_HANDLING: str = "exception_handling"
 CMD_HITL: str = "hitl"
 CMD_RAG: str = "rag"
 CMD_A2A: str = "a2a"
+CMD_RESOURCE_OPTIMIZATION: str = "resource_optimization"
 CMD_HELP: str = "help"
 
 EXAMPLES: Dict[str, str] = {
@@ -35,6 +36,7 @@ EXAMPLES: Dict[str, str] = {
     CMD_HITL: "Human-in-the-loop approval gate on side-effecting tool calls",
     CMD_RAG: "Retrieval-augmented generation: ground answers in a document corpus, cite sources, decline when unsupported",
     CMD_A2A: "Agent-to-Agent protocol: discover remote agents by card, delegate tasks over a transport with a lifecycle",
+    CMD_RESOURCE_OPTIMIZATION: "Resource-aware optimization: spend a finite budget across tasks by tiered cost/quality, protecting required work and degrading gracefully",
 }
 
 
@@ -61,6 +63,7 @@ def print_help() -> None:
     help_text += "  uv run python -m src.examples hitl\n"
     help_text += "  uv run python -m src.examples rag\n"
     help_text += "  uv run python -m src.examples a2a\n"
+    help_text += "  uv run python -m src.examples resource_optimization\n"
 
     print(help_text)
     logger.info("Help text displayed")

@@ -21,6 +21,7 @@ uv run python -m src.examples exception_handling  # Run exception handling examp
 uv run python -m src.examples hitl             # Run human-in-the-loop example
 uv run python -m src.examples rag              # Run retrieval-augmented generation example
 uv run python -m src.examples a2a              # Run agent-to-agent (A2A) collaboration example
+uv run python -m src.examples resource_optimization  # Run resource-aware optimization example
 uv run python -m src.examples help             # List all available examples
 ```
 
@@ -54,7 +55,8 @@ src/
 │   │   ├── hitl/                # Human-in-the-loop approval gate example
 │   │   └── rag/                 # Retrieval-augmented generation example
 │   └── production_patterns/  # Production-pattern modules
-│       └── a2a/                 # Agent-to-Agent protocol (discovery + task delegation) example
+│       ├── a2a/                 # Agent-to-Agent protocol (discovery + task delegation) example
+│       └── resource_optimization/  # Resource-aware optimization (tiered cost/quality budget) example
 ```
 
 ### Key Design Decisions
@@ -264,6 +266,18 @@ The Agent-to-Agent (A2A) pattern: capabilities live in independent *services*, e
 - **`SAMPLE_REQUESTS`** drive one path each: clean delegation (fx) → completed; a different agent (weather) → completed; under-specified ("Convert 300 into Japanese yen") → `INPUT_REQUIRED` → orchestrator supplies `USD` default → completed; and a request no card covers → orchestrator declines.
 
 Contrast: `multiagent` routes between personas sharing one in-process transcript; A2A puts each agent behind a card + transport and delegates a task envelope that can pause for input. `routing` classifies once then dispatches to a *local* handler; A2A's target is a remote service with its own lifecycle. `tools` calls in-process functions whose schemas the model knows up front; A2A *discovers* capabilities from cards at runtime. Entry point `handle_requests()` (exported from `__init__.py`), registered as `CMD_A2A` / `_run_a2a`.
+
+### Resource-Aware Optimization Example (`src/examples/production_patterns/resource_optimization/resource_optimizer.py`)
+
+The Resource-Aware Optimization pattern: the agent is given an explicit, finite **budget** and must decide, per unit of work, not just *whether* to do it but *how expensively* — walking a fixed cost/quality ladder down as the remaining budget shrinks, and funding required work before optional work. Second module under `production_patterns/`.
+
+- **Tier ladder** (plain string constants, tried richest-first): `PREMIUM` (full LLM call, thorough multi-sentence prompt) → `STANDARD` (LLM call, one-sentence prompt — the cost lever is prompt verbosity, not a different model, since the repo has one shared `llm`) → `ECONOMY` (no LLM call — a cached fact from `_ECONOMY_CACHE`) → `PLACEHOLDER` (free static note; **required** sections only, so one is never silently dropped) → `SKIP` (section omitted; **optional** sections only).
+- **`select_tier(costs, remaining, required)`** returns the first paid tier (`PREMIUM`/`STANDARD`/`ECONOMY`) whose cost fits `remaining`, else `PLACEHOLDER` for a required section or `SKIP` for an optional one.
+- **`Budget`** (`@dataclass`: `total`, `spent`, `remaining` property, `spend()`) is the only state threaded through `run_report()`. `SUBTASKS` (a `list[Subtask]`) is listed required-first, and `run_report()` re-sorts on `not s.required` so required sections are always priced and funded before optional ones regardless of list order.
+- **`run_report(company, budget_total)`**: for each section, pick a tier, run it (`run_subtask()`), deduct its cost, and print the decision. After all sections, if `budget.remaining >= SYNTHESIS_COST` an LLM pass (`build_synthesis_chain()`) merges the sections into one brief; otherwise synthesis itself degrades to a plain concatenation (`_format_sections()`), no further LLM spend.
+- **`SAMPLE_RUNS`** hold the company and task fixed and vary only the budget, so one report demonstrates the whole ladder as spending pressure changes: ample (70 units) → every section at `PREMIUM` plus a real synthesis pass; constrained (10 units) → required sections drop to `STANDARD`/`ECONOMY`, one optional section is skipped, synthesis degrades; minimal (3 units) → required sections hit `ECONOMY` or `PLACEHOLDER`, both optional sections are skipped, synthesis degrades.
+
+Contrast: `exception_handling` also walks a per-step ladder, but it's triggered by a *failure* (retry → fallback → degrade); here every step succeeds and the ladder is chosen *before* the step runs, purely from remaining budget. `hitl` gates side-effecting calls for a *human* to approve; here the gate is automatic and picks a cost tier, not approve/reject. `goal_monitoring` re-attempts the *whole* work product against a checklist until it passes; here the budget is spent once, in one pass, across independent sections — there is no retry, only tier selection. Entry point `handle_requests()` (exported from `__init__.py`), registered as `CMD_RESOURCE_OPTIMIZATION` / `_run_resource_optimization`.
 
 ### Shared Utilities
 

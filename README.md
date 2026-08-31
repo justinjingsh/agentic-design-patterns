@@ -15,6 +15,9 @@ A collection of design patterns and examples demonstrating how to build agentic 
 - **Goal Setting and Monitoring**: Turn a fuzzy goal into a checklist of measurable success criteria, then loop work → monitor-against-criteria → targeted retry until every criterion is met or an iteration cap is hit
 - **Exception Handling**: Harden the tool-calling loop against failing tools — classify each failure as transient or permanent, retry transient ones with exponential backoff, fall back to an alternative source, and degrade gracefully so one broken tool never aborts the run
 - **Human-in-the-Loop**: Gate side-effecting tool calls (book, email, cancel) behind a human who can approve, edit the arguments, or reject — and let the agent ask a clarifying question instead of guessing
+- **Retrieval-Augmented Generation**: Ground answers in a retrieved document corpus, cite sources by `[n]`, and decline with a fixed token when the corpus doesn't support an answer
+- **Agent-to-Agent (A2A)**: Discover remote agents by a published capability card, delegate a task over a transport with an explicit lifecycle (submitted → working → completed / input-required / failed), and follow up when an agent asks for more information
+- **Resource-Aware Optimization**: Spend a finite budget across a task's sub-steps by a tiered cost/quality ladder, funding required work first and degrading gracefully — cheaper prompts, cached facts, or omission — as the budget runs low
 - **AWS Bedrock Integration**: Examples using Claude models via AWS Bedrock
 - **Structured Output**: Demonstrates best practices for validating LLM outputs
 
@@ -36,6 +39,8 @@ This is intentional: `create_agent` is itself built out of these same LCEL/LangG
 - **`exception_handling`** (`reliability_layers/exception_handling/resilient_agent.py`): the Exception Handling / error-recovery pattern. `run_agent()` is the same bounded observe → decide → act tool-calling loop as `tools`, but each tool call goes through `call_tool_with_recovery()`, which never raises. Tools raise `TransientError` or `PermanentError` (shared base `ToolError`); anything else is caught and re-wrapped as permanent. The ladder: `_attempt_with_retries()` retries only transient failures up to `MAX_RETRIES` (3) with exponential backoff; on an unrecoverable failure the driver consults `FALLBACKS` and transparently calls an alternative tool (the backup is absent from the model-visible `PRIMARY_TOOLS`); if that too fails, `_degraded()` returns a `TOOL_UNAVAILABLE: ...` note the model is told to work around. Failures are scripted (a call counter), so every run recovers in the same places. Where `reflection` / `goal_monitoring` iterate on a *weak* result, this pattern handles a step that *fails outright*.
 - **`hitl`** (`reliability_layers/hitl/approval_agent.py`): the Human-in-the-Loop pattern. Same bounded tool-calling loop as `tools`, but each call goes through `_dispatch_call()`, which pauses side-effecting tools (`SENSITIVE_TOOLS` = `book_flight` / `send_email` / `cancel_booking`) for a human before they run; read-only tools run automatically. The human returns a `ReviewDecision` — `APPROVE` (run as proposed), `EDIT` (run with the human's arguments, tagged `HUMAN_EDITED:`), or `REJECT` (never runs, tagged `HUMAN_REJECTED:` — the model is told not to retry or route around it). The agent can also call `request_human_input` to ask a clarifying question instead of guessing. The `Reviewer` is a one-method protocol: `ScriptedReviewer` replays canned decisions so the demo runs unattended and deterministically; `ConsoleReviewer` blocks on `input()` for a real person. Where `exception_handling` wraps a call to recover from *failure*, this gate stops a call that would *succeed* from happening without sign-off.
 - **`rag`** (`reliability_layers/rag/rag_pipeline.py`): the Retrieval-Augmented Generation (Knowledge Retrieval) pattern. `run_rag()` is a fixed three-stage pipeline with no model-driven control flow: RETRIEVE (`retrieve()` scores every `Document` in `KNOWLEDGE_BASE` by lexical term overlap — a deterministic stand-in for embeddings + a vector store — and keeps the top `MAX_CONTEXT_DOCS` (3) above `MIN_RETRIEVAL_SCORE` (1); zero hits short-circuits to a refusal with no LLM call), AUGMENT (`_format_sources()` renders them as a numbered `[n]` SOURCES block), GENERATE (`build_answer_chain()` answers *only* from that block, cites each claim `[n]`, or emits exactly `INSUFFICIENT_CONTEXT` when the sources don't hold the answer). A deterministic `_check_citations()` post-check flags any `[n]` outside the retrieved set. The grounding is the reliability property — faithfulness, attribution, and an honest refusal when nothing relevant is retrieved. Unlike `tools`, where the model decides to fetch data and with what arguments, retrieval here is a fixed pre-step; unlike `exception_handling` / `hitl` there is no tool loop at all.
+- **`a2a`** (`production_patterns/a2a/a2a_orchestrator.py`): the Agent-to-Agent pattern. Capabilities live behind independent services, each publishing a machine-readable `AgentCard` (name, description, skills). `run_orchestrator()` discovers cards via `AgentRegistry.discover()`, has `build_dispatch_chain()` pick the one card whose skills fit the request (or decline), crafts a `Message` with `build_request_chain()`, and sends it over `RemoteConnection` — a stand-in for an HTTP call. The remote `RemoteAgentService.execute()` drives an explicit `Task` lifecycle (`submitted → working → completed / input-required / failed`) and never raises. On `input-required`, `build_followup_chain()` answers the agent's question and re-sends against the same `task_id`, up to `MAX_ROUNDS` (3); on `completed`, `build_synthesis_chain()` relays the result. Unlike `multiagent`, where personas share one in-process transcript, agents here are discovered by card and invoked across a protocol boundary with their own lifecycle.
+- **`resource_optimization`** (`production_patterns/resource_optimization/resource_optimizer.py`): the Resource-Aware Optimization pattern. `run_report()` spends a finite `Budget` across a fixed list of report sections (`SUBTASKS`), required sections funded before optional ones. `select_tier()` picks the richest tier whose cost fits what's left — `PREMIUM` (thorough LLM call) → `STANDARD` (terse LLM call) → `ECONOMY` (a cached fact, no LLM call) — falling back to a free `PLACEHOLDER` note for a required section that can't be afforded at all, or `SKIP` for an optional one. Once every section is filled, an LLM synthesis pass merges them if the budget still allows it, otherwise the sections are concatenated as-is. Unlike `exception_handling`'s ladder, which triggers on a *failure*, this ladder is chosen up front from *remaining budget* — every step succeeds, only its cost and quality vary.
 
 **When to reach for `create_agent` instead:** when the LLM itself needs to decide *which* tool(s) to call, possibly in a multi-step loop, reasoning over each result before continuing (e.g., "look up flight prices, then check hotel availability, then answer"). `create_agent` absorbs that observe → decide → act → repeat loop so you don't hand-roll it — the `tools` example above hand-rolls exactly that loop on purpose, to show what `create_agent` would otherwise hide. It's less suited to cases like this repo's routing example, where dispatch is deterministic and fixed by a lookup map rather than left to the model's judgment.
 
@@ -120,6 +125,12 @@ uv run python -m src.examples hitl
 # Run the retrieval-augmented generation example
 uv run python -m src.examples rag
 
+# Run the agent-to-agent (A2A) collaboration example
+uv run python -m src.examples a2a
+
+# Run the resource-aware optimization example
+uv run python -m src.examples resource_optimization
+
 # Show available examples and usage
 uv run python -m src.examples help
 ```
@@ -185,17 +196,25 @@ agentic-design-patterns/
 │       │   └── goal_monitoring/   # Goal setting and monitoring example
 │       │       ├── __init__.py
 │       │       └── goal_tracker.py     # Goal -> criteria checklist -> work/monitor loop
-│       └── reliability_layers/    # Reliability-layer pattern modules
+│       ├── reliability_layers/    # Reliability-layer pattern modules
+│       │   ├── __init__.py
+│       │   ├── exception_handling/  # Exception handling / error recovery example
+│       │   │   ├── __init__.py
+│       │   │   └── resilient_agent.py  # retry -> fallback -> graceful degradation ladder
+│       │   ├── hitl/                # Human-in-the-loop approval gate example
+│       │   │   ├── __init__.py
+│       │   │   └── approval_agent.py   # approve / edit / reject gate on side-effecting tools
+│       │   └── rag/                 # Retrieval-augmented generation example
+│       │       ├── __init__.py
+│       │       └── rag_pipeline.py     # retrieve -> augment -> generate, grounded + cited answers
+│       └── production_patterns/   # Production-pattern modules
 │           ├── __init__.py
-│           ├── exception_handling/  # Exception handling / error recovery example
+│           ├── a2a/                 # Agent-to-Agent protocol example
 │           │   ├── __init__.py
-│           │   └── resilient_agent.py  # retry -> fallback -> graceful degradation ladder
-│           ├── hitl/                # Human-in-the-loop approval gate example
-│           │   ├── __init__.py
-│           │   └── approval_agent.py   # approve / edit / reject gate on side-effecting tools
-│           └── rag/                 # Retrieval-augmented generation example
+│           │   └── a2a_orchestrator.py  # discover cards -> delegate a task -> follow up -> synthesise
+│           └── resource_optimization/  # Resource-aware optimization example
 │               ├── __init__.py
-│               └── rag_pipeline.py     # retrieve -> augment -> generate, grounded + cited answers
+│               └── resource_optimizer.py  # tiered cost/quality ladder spent against a fixed budget
 │
 ├── app.py                          # Entry point wrapper
 ├── pyproject.toml                  # Project configuration and dependencies
